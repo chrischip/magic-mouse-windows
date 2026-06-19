@@ -6,27 +6,22 @@ configuring the system to load it.
 
 ---
 
-## Quick Start
+## Install — one command, no tools required
 
-No git, no pre-installed tools required. Open PowerShell **as Administrator**
-and paste this single command:
+**Step 1.** Press `Win`, type `powershell`, right-click **Windows PowerShell** → **Run as administrator**
 
-```powershell
+**Step 2.** Paste and run:
+
+```
 Set-ExecutionPolicy Bypass -Scope Process -Force; irm https://raw.githubusercontent.com/chrischip/magic-mouse-windows/main/Setup-MagicMouse.ps1 | iex
 ```
 
-> **How to open an elevated PowerShell:**
-> Press `Win`, type `powershell`, right-click **Windows PowerShell** →
-> **Run as administrator**, then paste the command above.
+**Step 3.** Reboot when prompted, then pair your Magic Mouse via **Settings → Bluetooth**
 
-The script will download everything it needs (~700 MB from Apple's servers),
-sign the driver with a certificate it generates for your machine, configure
-Windows, and ask whether to reboot.
+That's it. No git, no Visual Studio, no extra downloads needed beforehand.
+The script fetches everything (~700 MB from Apple's servers) and sets itself up.
 
-After rebooting:
-1. Pair your Magic Mouse via **Settings → Bluetooth → Add device**
-2. It should appear as **Apple Wireless Mouse** in Device Manager under
-   *Mice and other pointing devices*
+---
 
 ---
 
