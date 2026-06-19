@@ -1,0 +1,22 @@
+# Apple proprietary binaries -- never redistribute
+*.pkg
+*.dmg
+*.sys
+*.cat
+bootcamp/
+driver/AppleWirelessMouse.*
+
+# Private key -- NEVER commit
+*.pfx
+
+# Generated/working certs (public .cer is per-machine, not shared)
+*.cer
+
+# Build / extraction artifacts
+extract1/
+extract2/
+extractDmg/
+
+# Dev scripts not needed by end users
+brigadier.ps1
+sign_driver.ps1
