@@ -16,6 +16,7 @@ driver/AppleWirelessMouse.*
 extract1/
 extract2/
 extractDmg/
+test_signing/
 
 # Dev scripts not needed by end users
 brigadier.ps1

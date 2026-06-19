@@ -1,5 +1,30 @@
 # Apple Magic Mouse Driver for Windows
 
+> ### ⚠️ EARLY DEVELOPMENT — HIGH RISK
+>
+> **This project is experimental and has not been widely tested.**
+> It makes low-level changes to your Windows kernel configuration that
+> cannot be undone without manual steps and a reboot.
+>
+> **Do NOT run this on:**
+> - Work or corporate laptops
+> - Machines storing sensitive data or credentials
+> - Any machine you cannot afford to spend time recovering
+>
+> **Expect:**
+> - Possible driver load failures (blue screen / reboot loop in worst case)
+> - A permanent "Test Mode" watermark on your desktop
+> - Reduced kernel security until you manually undo the changes
+>
+> **This is suitable for:** personal machines, spare laptops, and VMs where
+> you understand the risks and know how to restore Windows if something
+> goes wrong. See the [Uninstalling](#uninstalling) section for full
+> rollback instructions.
+>
+> Use at your own risk. No warranty is provided.
+
+---
+
 Installs Apple's Magic Mouse driver on Windows by fetching it directly from
 Apple's Boot Camp CDN, signing it with a machine-generated certificate, and
 configuring the system to load it.
@@ -242,6 +267,41 @@ Windows understands.
 The driver binary is compiled and signed by Apple. This script re-signs the
 **catalog file** (which is the trust anchor Windows checks) with a locally
 generated certificate, without modifying the driver binary itself.
+
+---
+
+## Testing / Development
+
+`Test-MagicMouseDriver.ps1` is a simulation test that verifies the driver
+installation without needing a physical Magic Mouse or Bluetooth hardware.
+It uses `devcon.exe` (Windows Driver Kit) to create a virtual device node
+with the Magic Mouse hardware ID, then checks that Windows binds the correct
+Apple driver to it.
+
+**Prerequisites:** Run `Setup-MagicMouse.ps1` first, then install the WDK:
+```powershell
+winget install Microsoft.WindowsWDK.10.0.26100
+```
+
+**Run the tests:**
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\Test-MagicMouseDriver.ps1
+```
+
+**What is tested:**
+
+| # | Test | What it checks |
+|---|---|---|
+| 1 | Tools present | `devcon.exe` and `signtool.exe` are available |
+| 2 | Driver staged | Driver package is in the Windows driver store |
+| 3 | Signature valid | `.cat` and `.sys` pass `signtool verify /pa` |
+| 4 | Virtual device created | `devcon install` succeeds with the Magic Mouse hardware ID |
+| 5 | Correct driver bound | Device appears as *Apple Wireless Mouse*, not generic HID |
+| 6 | Clean removal | Virtual device is fully removed after the test |
+
+The script exits with code `0` on full pass, or the number of failures on
+partial/full fail — suitable for use in CI pipelines.
 
 ---
 
