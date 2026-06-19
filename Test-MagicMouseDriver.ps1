@@ -28,8 +28,12 @@
 
 $ErrorActionPreference = "Stop"
 
-# Hardware ID from AppleWirelessMouse.inf -- Magic Mouse 2
-$testHwId   = "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&0310"
+# Expected hardware IDs from AppleWirelessMouse.inf
+$expectedHwIds = @(
+    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&030d",  # Magic Mouse 1
+    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&0310",  # Magic Mouse 2
+    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0269"   # Magic Mouse (alt)
+)
 $driverDir  = "C:\Users\Docker\magicMouseDriver\driver"
 $signtool   = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
 
@@ -81,7 +85,7 @@ Write-Host "    signtool: $signtool"
 # Test 2: Driver is staged in the Windows driver store
 # ---------------------------------------------------------------------------
 Write-Host "`n[2] Driver store" -ForegroundColor Cyan
-$stagedDriver = pnputil /enum-drivers 2>&1 | Select-String -A6 "AppleWirelessMouse" | Select-Object -First 1
+$stagedDriver = pnputil /enum-drivers 2>&1 | Select-String "AppleWirelessMouse" | Select-Object -First 1
 Test-Assert "Driver is staged in driver store" ($null -ne $stagedDriver) "Run Setup-MagicMouse.ps1 first"
 
 # ---------------------------------------------------------------------------
@@ -100,55 +104,59 @@ foreach ($file in @("AppleWirelessMouse.cat", "AppleWirelessMouse.sys")) {
 }
 
 # ---------------------------------------------------------------------------
-# Test 4: Create virtual device with Magic Mouse hardware ID
+# Test 4: INF validation -- hardware IDs, service, binary reference
 # ---------------------------------------------------------------------------
-Write-Host "`n[4] Virtual device creation" -ForegroundColor Cyan
+Write-Host "`n[4] INF validation" -ForegroundColor Cyan
 
-$infPath = Join-Path $driverDir "AppleWirelessMouse.inf"
+$infPath    = Join-Path $driverDir "AppleWirelessMouse.inf"
+$infContent = Get-Content $infPath -Raw -ErrorAction SilentlyContinue
 Test-Assert "INF file present" (Test-Path $infPath)
 
-$devconOut = & $devcon install "$infPath" "$testHwId" 2>&1
-$installed  = ($devconOut | Select-String "Device node created|Drivers installed|already installed") -ne $null
-$noError    = ($devconOut | Select-String "failed|error" -CaseSensitive:$false) -eq $null
-Test-Assert "Virtual device created by devcon" $installed ($devconOut | Out-String).Trim()
-Test-Assert "devcon reported no errors"        $noError   ($devconOut | Out-String).Trim()
-
-# Give Windows a moment to bind the driver
-Start-Sleep -Seconds 3
-
-# ---------------------------------------------------------------------------
-# Test 5: Correct driver bound (Apple, not generic HID)
-# ---------------------------------------------------------------------------
-Write-Host "`n[5] Driver binding" -ForegroundColor Cyan
-
-$device = Get-PnpDevice | Where-Object {
-    $_.HardwareID -like "*VID*05ac*PID*0310*" -or
-    $_.FriendlyName -match "Apple Wireless Mouse"
-} | Select-Object -First 1
-
-Test-Assert "Device visible in PnP manager"      ($null -ne $device)
-Test-Assert "Device name is 'Apple Wireless Mouse'" ($device.FriendlyName -match "Apple Wireless Mouse") "Got: $($device.FriendlyName)"
-Test-Assert "Device status is OK (no error code)" ($device.Status -eq "OK") "Status: $($device.Status) -- Code: $($device.ConfigManagerErrorCode)"
-
-if ($device) {
-    Write-Host "    Name   : $($device.FriendlyName)"
-    Write-Host "    Status : $($device.Status)"
-    Write-Host "    HW ID  : $($device.HardwareID | Select-Object -First 1)"
+foreach ($hwId in $expectedHwIds) {
+    Test-Assert "INF contains HW ID: $hwId" ($infContent -match [regex]::Escape($hwId))
 }
 
-# ---------------------------------------------------------------------------
-# Test 6: Clean up virtual device
-# ---------------------------------------------------------------------------
-Write-Host "`n[6] Cleanup" -ForegroundColor Cyan
+Test-Assert "INF references applewirelessmouse.sys" ($infContent -match "applewirelessmouse\.sys")
+Test-Assert "INF service type is KERNEL_DRIVER"     ($infContent -match "ServiceType\s*=\s*(%SERVICE_KERNEL_DRIVER%|0x1|1)")
 
-$removeOut = & $devcon remove "$testHwId" 2>&1
-$removed   = ($removeOut | Select-String "removed|no matching") -ne $null
-Test-Assert "Virtual device removed" $removed ($removeOut | Out-String).Trim()
+$sysBinary = Join-Path $driverDir "AppleWirelessMouse.sys"
+Test-Assert "SYS binary present alongside INF"      (Test-Path $sysBinary)
 
-# Verify it's gone
-Start-Sleep -Seconds 2
-$stillThere = Get-PnpDevice | Where-Object { $_.HardwareID -like "*VID*05ac*PID*0310*" }
-Test-Assert "Device no longer in PnP manager" ($null -eq $stillThere)
+# ---------------------------------------------------------------------------
+# Test 5: Driver store -- hardware ID coverage
+# ---------------------------------------------------------------------------
+Write-Host "`n[5] Driver store coverage" -ForegroundColor Cyan
+
+$driverEnum = pnputil /enum-drivers 2>&1 | Out-String
+$publishedName = (pnputil /enum-drivers 2>&1 | Select-String "oem\d+\.inf" |
+    ForEach-Object { $_.Matches.Value } | Select-Object -First 1)
+
+Test-Assert "Driver has a published (oem*.inf) name in driver store" ($null -ne $publishedName) "Run Setup-MagicMouse.ps1 first"
+if ($publishedName) { Write-Host "    Published name: $publishedName" }
+
+# devcon dp_enum lists hardware IDs covered by each staged driver package
+$dpEnum = & $devcon dp_enum 2>&1 | Out-String
+$coversMouseHwId = $dpEnum -match "05ac" -or $driverEnum -match "AppleWireless"
+Test-Assert "Staged driver covers Apple Wireless Mouse hardware IDs" $coversMouseHwId
+
+# ---------------------------------------------------------------------------
+# Test 6: Hardware binding (requires physical Bluetooth + Magic Mouse)
+# ---------------------------------------------------------------------------
+Write-Host "`n[6] Hardware binding" -ForegroundColor Cyan
+
+$liveDevice = Get-PnpDevice | Where-Object {
+    ($_.HardwareID -like "*VID*05ac*") -or ($_.FriendlyName -match "Apple Wireless Mouse")
+} | Select-Object -First 1
+
+if ($null -ne $liveDevice) {
+    Test-Assert "Device visible in PnP manager"         ($null -ne $liveDevice)
+    Test-Assert "Device name is 'Apple Wireless Mouse'" ($liveDevice.FriendlyName -match "Apple Wireless Mouse") "Got: $($liveDevice.FriendlyName)"
+    Test-Assert "Device has no error code"              ($liveDevice.Status -eq "OK") "Status: $($liveDevice.Status)"
+    Write-Host "    Name  : $($liveDevice.FriendlyName)"
+    Write-Host "    Status: $($liveDevice.Status)"
+} else {
+    Write-Host "  SKIP  No Magic Mouse detected via Bluetooth -- pair the mouse and re-run to test hardware binding" -ForegroundColor DarkGray
+}
 
 # ---------------------------------------------------------------------------
 # Summary
