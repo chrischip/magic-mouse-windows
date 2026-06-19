@@ -31,8 +31,10 @@ $ErrorActionPreference = "Stop"
 # Expected hardware IDs from AppleWirelessMouse.inf
 $expectedHwIds = @(
     "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&030d",  # Magic Mouse 1
-    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&0310",  # Magic Mouse 2
-    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0269"   # Magic Mouse (alt)
+    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&0310",  # Magic Mouse 2 (Lightning)
+    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0269",  # Magic Mouse 2 (alt BT VID)
+    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&0323",  # Magic Mouse USB-C
+    "BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0323"   # Magic Mouse USB-C (alt BT VID)
 )
 $driverDir  = "C:\Users\Docker\magicMouseDriver\driver"
 $signtool   = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"

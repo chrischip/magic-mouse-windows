@@ -215,6 +215,30 @@ Write-OK "Driver files staged:"
 Get-ChildItem $driverDir | ForEach-Object { Write-Info "$($_.Name)  ($($_.Length) bytes)" }
 
 # ---------------------------------------------------------------------------
+# Step 3b -- Patch INF to add USB-C Magic Mouse hardware IDs
+#             Apple's 2019 INF predates the USB-C model (2023, PID 0x0323).
+#             We add candidate Bluetooth hardware IDs so the driver binds on
+#             both VID variants (05ac = Apple USB VID, 004c = Apple BT VID).
+# ---------------------------------------------------------------------------
+$infPath = Get-ChildItem $driverDir -Filter "AppleWirelessMouse.inf" | Select-Object -First 1 -ExpandProperty FullName
+if ($infPath) {
+    $infContent = Get-Content $infPath -Raw
+    $usbcEntries = @(
+        '%AppleWirelessMouse.DeviceDesc%=AppleWirelessMouse,   BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&000205ac_PID&0323',
+        '%AppleWirelessMouse.DeviceDesc%=AppleWirelessMouse,   BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0323'
+    )
+    $insertAfter = 'BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&0001004c_PID&0269'
+    if ($infContent -notmatch [regex]::Escape('PID&0323')) {
+        $patch = "`r`n; Magic Mouse (USB-C, 2023) -- PID 0x0323 per Linux kernel 6.16`r`n" + ($usbcEntries -join "`r`n")
+        $infContent = $infContent -replace ([regex]::Escape($insertAfter)), "$insertAfter$patch"
+        [System.IO.File]::WriteAllText($infPath, $infContent, [System.Text.Encoding]::ASCII)
+        Write-OK "INF patched: added USB-C Magic Mouse hardware IDs (PID 0x0323)"
+    } else {
+        Write-OK "INF already contains USB-C hardware IDs."
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Step 4 -- Generate a self-signed code-signing certificate
 #            Each user gets their own -- nothing pre-signed is distributed.
 # ---------------------------------------------------------------------------
