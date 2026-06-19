@@ -20,12 +20,12 @@
     root CA is distributed, which is safer for an open-source tool.
 
 .NOTES
-    Run from an elevated (Administrator) PowerShell prompt:
+    One-liner (no git required -- works on any vanilla Windows machine):
+        Set-ExecutionPolicy Bypass -Scope Process -Force; irm https://raw.githubusercontent.com/chrischip/magic-mouse-windows/main/Setup-MagicMouse.ps1 | iex
+
+    Or clone and run locally:
         Set-ExecutionPolicy Bypass -Scope Process -Force
         .\Setup-MagicMouse.ps1
-
-    Or as a one-liner pointing at the raw GitHub URL:
-        Set-ExecutionPolicy Bypass -Scope Process -Force; irm <raw-github-url> | iex
 
     Tested on Windows 10 21H2+ and Windows 11.
     Secure Boot does not need to be disabled.
@@ -34,6 +34,15 @@
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference    = "SilentlyContinue"   # speeds up Invoke-WebRequest significantly
+
+# Admin check that works both when run as a .ps1 file and when piped via irm | iex
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "ERROR: This script must be run from an elevated (Administrator) PowerShell prompt." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Right-click PowerShell and choose 'Run as administrator', then run:" -ForegroundColor Yellow
+    Write-Host "  Set-ExecutionPolicy Bypass -Scope Process -Force; irm https://raw.githubusercontent.com/chrischip/magic-mouse-windows/main/Setup-MagicMouse.ps1 | iex" -ForegroundColor Cyan
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
