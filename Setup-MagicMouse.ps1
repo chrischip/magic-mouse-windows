@@ -98,7 +98,14 @@ $esdUrl = $null
 
 try {
     Write-Info "Fetching Apple software update catalog (this may take a moment)..."
-    [xml]$catalog = (Invoke-WebRequest -Uri $catalogUrl -UseBasicParsing).Content
+    $catalogResponse = Invoke-WebRequest -Uri $catalogUrl -UseBasicParsing
+    # Apple's server may return gzip-compressed bytes rather than a string
+    $catalogText = if ($catalogResponse.Content -is [byte[]]) {
+        [System.Text.Encoding]::UTF8.GetString($catalogResponse.Content)
+    } else {
+        $catalogResponse.Content
+    }
+    [xml]$catalog = $catalogText
 
     # The plist structure: plist > dict > dict (Products) > dict (each product)
     $products = $catalog.plist.dict.ChildNodes | Where-Object { $_.Name -eq "dict" }
@@ -260,6 +267,14 @@ Write-OK "Certificate created."
 Write-Info "Subject    : $($cert.Subject)"
 Write-Info "Thumbprint : $($cert.Thumbprint)"
 Write-Info "Expires    : $($cert.NotAfter)"
+
+# Add cert to Root store now so Set-AuthenticodeSignature trusts it during signing.
+# TrustedPublisher is added later in step 8 (after HVCI/testsigning are configured).
+$rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "LocalMachine")
+$rootStore.Open("ReadWrite")
+$rootStore.Add($cert)
+$rootStore.Close()
+Write-OK "Certificate trusted in LocalMachine\Root (required for signing)."
 
 # ---------------------------------------------------------------------------
 # Step 5 -- Sign the driver files with Set-AuthenticodeSignature
