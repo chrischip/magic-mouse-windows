@@ -98,13 +98,10 @@ $esdUrl = $null
 
 try {
     Write-Info "Fetching Apple software update catalog (this may take a moment)..."
-    $catalogResponse = Invoke-WebRequest -Uri $catalogUrl -UseBasicParsing
-    # Apple's server may return gzip-compressed bytes rather than a string
-    $catalogText = if ($catalogResponse.Content -is [byte[]]) {
-        [System.Text.Encoding]::UTF8.GetString($catalogResponse.Content)
-    } else {
-        $catalogResponse.Content
-    }
+    # Use WebClient so .NET handles gzip/deflate decompression automatically
+    $wc = New-Object System.Net.WebClient
+    $wc.Headers.Add("Accept-Encoding", "gzip, deflate")
+    $catalogText = $wc.DownloadString($catalogUrl)
     [xml]$catalog = $catalogText
 
     # The plist structure: plist > dict > dict (Products) > dict (each product)
@@ -277,32 +274,39 @@ $rootStore.Close()
 Write-OK "Certificate trusted in LocalMachine\Root (required for signing)."
 
 # ---------------------------------------------------------------------------
-# Step 5 -- Sign the driver files with Set-AuthenticodeSignature
-#            (built-in PowerShell -- no signtool / WDK required)
+# Step 5 -- Rebuild catalog and sign it
+#
+# The Apple-supplied .cat has hashes of the original unmodified files.
+# We patched the .inf (USB-C IDs), so that hash is now stale.
+# Signing the .sys directly would also change it and invalidate its hash.
+# Correct approach: rebuild the catalog from the current .inf + .sys using
+# New-FileCatalog (built-in PS 5.1+), then sign only the new .cat.
+# The .sys is left untouched -- its integrity is guaranteed by the .cat hash.
 # ---------------------------------------------------------------------------
-Write-Step 5 "Signing driver files with the new certificate..."
+Write-Step 5 "Rebuilding driver catalog and signing with the new certificate..."
 
-$filesToSign = Get-ChildItem $driverDir -Include "*.sys","*.cat" -Recurse
+$infFile = Join-Path $driverDir "AppleWirelessMouse.inf"
+$sysFile = Join-Path $driverDir "AppleWirelessMouse.sys"
+$catFile = Join-Path $driverDir "AppleWirelessMouse.cat"
 
-foreach ($f in $filesToSign) {
-    $result = Set-AuthenticodeSignature `
-        -FilePath $f.FullName `
-        -Certificate $cert `
-        -HashAlgorithm SHA256 `
-        -TimestampServer "http://timestamp.digicert.com"
+Remove-Item $catFile -ErrorAction SilentlyContinue
+$null = New-FileCatalog -Path @($infFile, $sysFile) -CatalogFilePath $catFile -CatalogVersion 2
+Write-OK "Catalog rebuilt with current file hashes."
 
-    if ($result.Status -eq "Valid") {
-        Write-OK "Signed: $($f.Name)"
-    } else {
-        # Timestamp server may be unreachable -- retry without it
-        Write-Warn "Timestamp failed, retrying without timestamp server..."
-        $result = Set-AuthenticodeSignature -FilePath $f.FullName -Certificate $cert -HashAlgorithm SHA256
-        if ($result.Status -eq "Valid") {
-            Write-OK "Signed (no timestamp): $($f.Name)"
-        } else {
-            throw "Failed to sign $($f.Name): $($result.StatusMessage)"
-        }
-    }
+$result = Set-AuthenticodeSignature `
+    -FilePath $catFile `
+    -Certificate $cert `
+    -HashAlgorithm SHA256 `
+    -TimestampServer "http://timestamp.digicert.com"
+
+if ($result.Status -ne "Valid") {
+    Write-Warn "Timestamp server unreachable, retrying without timestamp..."
+    $result = Set-AuthenticodeSignature -FilePath $catFile -Certificate $cert -HashAlgorithm SHA256
+}
+if ($result.Status -eq "Valid") {
+    Write-OK "Signed: AppleWirelessMouse.cat"
+} else {
+    throw "Failed to sign AppleWirelessMouse.cat: $($result.StatusMessage)"
 }
 
 # ---------------------------------------------------------------------------

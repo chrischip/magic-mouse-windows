@@ -120,6 +120,7 @@ foreach ($hwId in $expectedHwIds) {
 
 Test-Assert "INF references applewirelessmouse.sys" ($infContent -match "applewirelessmouse\.sys")
 Test-Assert "INF service type is KERNEL_DRIVER"     ($infContent -match "ServiceType\s*=\s*(%SERVICE_KERNEL_DRIVER%|0x1|1)")
+Test-Assert "INF contains USB-C hardware IDs"       ($infContent -match "PID&0323")
 
 $sysBinary = Join-Path $driverDir "AppleWirelessMouse.sys"
 Test-Assert "SYS binary present alongside INF"      (Test-Path $sysBinary)
