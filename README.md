@@ -31,6 +31,21 @@ configuring the system to load it.
 
 ---
 
+## Supported Models
+
+| Model | Bluetooth PID | Status |
+|---|---|---|
+| Magic Mouse 1 | `030d` | Supported |
+| Magic Mouse 2 (Lightning) | `0310` | Supported |
+| Magic Mouse (USB-C, 2023) | `0323` | Likely supported — PID unconfirmed on Windows |
+
+The USB-C model hardware ID is based on the Linux kernel 6.16 patch that added
+support for it. If you have the USB-C model and the driver doesn't bind after
+pairing, open Device Manager, find the mouse under Bluetooth, check its hardware
+ID in Properties → Details, and open a GitHub issue with that value.
+
+---
+
 ## Install — one command, no tools required
 
 **Step 1.** Press `Win`, type `powershell`, right-click **Windows PowerShell** → **Run as administrator**
@@ -48,20 +63,20 @@ The script fetches everything (~700 MB from Apple's servers) and sets itself up.
 
 ---
 
----
-
 ## What the Script Does
 
+0. Offers to create a **Windows System Restore Point** — strongly recommended
 1. Downloads **7-Zip** (if not installed) — needed to unpack Apple's pkg/dmg format
 2. Fetches the **Boot Camp ESD** (~700 MB) from Apple's software update servers
-3. Extracts the `AppleWirelessMouse` driver (`INF` + `SYS` + `CAT`)
-4. Generates a **self-signed code-signing certificate unique to your machine**
-5. Signs the driver package with that certificate
-6. Disables **HVCI (Memory Integrity)** if it is currently enabled
-7. Enables **Windows test-signing mode**
-8. Installs the certificate into the system trust stores
-9. Stages the driver with `pnputil`
-10. Offers to reboot
+3. Extracts the `AppleWirelessMouse` driver (`INF` + `SYS` + `CAT`) and verifies the SHA256 hash of the download
+4. Patches the INF to add **USB-C Magic Mouse** hardware IDs (not in Apple's 2019 original)
+5. Generates a **self-signed code-signing certificate unique to your machine**
+6. Rebuilds the driver catalog with correct file hashes, then signs it
+7. Disables **HVCI (Memory Integrity)** if it is currently enabled
+8. Enables **Windows test-signing mode**
+9. Installs the certificate into the system trust stores
+10. Stages the driver with `pnputil`
+11. Offers to reboot
 
 No Apple binaries are included in this repository. They are downloaded at
 runtime directly from Apple's servers.
@@ -172,7 +187,6 @@ adds it to two Windows certificate stores:
 
 **How to remove the certificate:**
 ```powershell
-# Find and remove from all three stores
 $thumb = (Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.Subject -match "MagicMouseDriver" }).Thumbprint
 foreach ($store in @("My","Root","TrustedPublisher")) {
     Get-ChildItem "Cert:\LocalMachine\$store" |
@@ -210,10 +224,9 @@ foreach ($store in @("My","Root","TrustedPublisher")) {
 To fully remove the driver and undo all system changes:
 
 ```powershell
-# 1. Remove the driver from the Windows driver store
-#    (find the published name first)
-pnputil /enum-drivers | Select-String -A5 "AppleWirelessMouse"
-# Then delete it (replace oem2.inf with the actual published name):
+# 1. Find the published driver name and remove it
+pnputil /enum-drivers | Select-String "AppleWirelessMouse"
+# Replace oem2.inf with the actual published name shown above:
 pnputil /delete-driver oem2.inf /uninstall
 
 # 2. Turn off test-signing mode (requires reboot)
@@ -234,6 +247,10 @@ foreach ($store in @("My","Root","TrustedPublisher")) {
 # 5. Reboot
 Restart-Computer
 ```
+
+Alternatively, if you created a restore point when prompted by the script,
+use **Settings → System → Recovery → Open System Restore** to roll back all
+changes in one step.
 
 ---
 
@@ -264,26 +281,23 @@ lower filter driver**. It sits below the standard HID stack and translates the
 Magic Mouse's raw touch sensor data into standard scroll and pointer events
 Windows understands.
 
-The driver binary is compiled and signed by Apple. This script re-signs the
-**catalog file** (which is the trust anchor Windows checks) with a locally
-generated certificate, without modifying the driver binary itself.
+The driver binary is compiled and signed by Apple. This script:
+1. Rebuilds the **catalog file** (`.cat`) from the current driver files using `New-FileCatalog` — necessary because we patch the INF to add USB-C hardware IDs, which changes its hash
+2. Signs the new catalog with a locally generated certificate
+3. Leaves the `.sys` binary untouched — Apple's original binary is preserved; its integrity is guaranteed by its hash in the catalog
 
 ---
 
 ## Testing / Development
 
-`Test-MagicMouseDriver.ps1` is a simulation test that verifies the driver
-installation without needing a physical Magic Mouse or Bluetooth hardware.
-It uses `devcon.exe` (Windows Driver Kit) to create a virtual device node
-with the Magic Mouse hardware ID, then checks that Windows binds the correct
-Apple driver to it.
+`Test-MagicMouseDriver.ps1` verifies the driver installation without needing
+a physical Magic Mouse. It requires `devcon.exe` from the Windows Driver Kit:
 
-**Prerequisites:** Run `Setup-MagicMouse.ps1` first, then install the WDK:
 ```powershell
 winget install Microsoft.WindowsWDK.10.0.26100
 ```
 
-**Run the tests:**
+**Run as Administrator after running Setup-MagicMouse.ps1:**
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\Test-MagicMouseDriver.ps1
@@ -295,13 +309,13 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 |---|---|---|
 | 1 | Tools present | `devcon.exe` and `signtool.exe` are available |
 | 2 | Driver staged | Driver package is in the Windows driver store |
-| 3 | Signature valid | `.cat` and `.sys` pass `signtool verify /pa` |
-| 4 | Virtual device created | `devcon install` succeeds with the Magic Mouse hardware ID |
-| 5 | Correct driver bound | Device appears as *Apple Wireless Mouse*, not generic HID |
-| 6 | Clean removal | Virtual device is fully removed after the test |
+| 3 | Signature valid | `.cat` passes `signtool verify /pa` |
+| 4 | INF validation | Hardware IDs (MM1, MM2, USB-C), service type, binary reference |
+| 5 | Driver store coverage | Staged package covers Apple Wireless Mouse hardware IDs |
+| 6 | Hardware binding | Device status OK (skipped automatically if no mouse is paired) |
 
-The script exits with code `0` on full pass, or the number of failures on
-partial/full fail — suitable for use in CI pipelines.
+The script exits with code `0` on full pass, or the number of failures —
+suitable for use in CI pipelines.
 
 ---
 
