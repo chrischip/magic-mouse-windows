@@ -93,8 +93,12 @@ if (-not (Test-Path $7z)) {
 Write-Step 2 "Locating Boot Camp driver package from Apple's update catalog..."
 
 $catalogUrl = "https://swscan.apple.com/content/catalogs/others/index-10.15-10.14-10.13-10.12-10.11-10.10-10.9-mountainlion-lion-snowleopard-leopard.merged-1.sucatalog"
-$esdFallback = "http://swcdn.apple.com/content/downloads/48/61/061-97204/zjcotww2iqibyvy6wbx3q9d50ca4lhig85/BootCampESD.pkg"
-$esdUrl = $null
+# Boot Camp 6.1.7700 -- the last release containing the AppleWirelessMouse driver.
+# SHA256 of BootCampESD.pkg is used to verify download integrity when using this URL.
+$esdFallback     = "http://swcdn.apple.com/content/downloads/48/61/061-97204/zjcotww2iqibyvy6wbx3q9d50ca4lhig85/BootCampESD.pkg"
+$esdFallbackHash = "BC4B3960901598AB0B2D40AA1A7E0AC78EC4A94964F8E99B3CA429780FCEE9E3"
+$esdUrl          = $null
+$esdExpectedHash = $null   # set when we know which URL we're using
 
 try {
     Write-Info "Fetching Apple software update catalog (this may take a moment)..."
@@ -155,7 +159,8 @@ try {
 
 if (-not $esdUrl) {
     Write-Warn "Falling back to known-good Boot Camp 6.1 ESD URL..."
-    $esdUrl = $esdFallback
+    $esdUrl          = $esdFallback
+    $esdExpectedHash = $esdFallbackHash
 }
 
 # ---------------------------------------------------------------------------
@@ -182,6 +187,19 @@ if (Test-Path $pkgPath) {
         $ProgressPreference = "SilentlyContinue"
     }
     Write-OK "Downloaded: $([math]::Round((Get-Item $pkgPath).Length/1MB,0)) MB"
+}
+
+# Verify download integrity when we have a known-good hash (fallback URL)
+if ($esdExpectedHash) {
+    Write-Info "Verifying download integrity..."
+    $actualHash = (Get-FileHash $pkgPath -Algorithm SHA256).Hash
+    if ($actualHash -ne $esdExpectedHash) {
+        Remove-Item $pkgPath -Force
+        throw "SHA256 mismatch on BootCampESD.pkg -- file is corrupt or tampered.`n  Expected: $esdExpectedHash`n  Got     : $actualHash"
+    }
+    Write-OK "SHA256 verified: $($actualHash.Substring(0,16))..."
+} else {
+    Write-Warn "Catalog-discovered ESD -- skipping hash check (hash unknown for dynamic URLs)"
 }
 
 Write-Step 3 "Extracting Boot Camp ESD (3 layers: pkg > cpio > dmg)..."
@@ -217,6 +235,19 @@ Write-OK "Found driver: $($mouseDriverSrc.FullName)"
 Copy-Item (Join-Path $mouseDriverSrc.FullName "*") $driverDir -Force
 Write-OK "Driver files staged:"
 Get-ChildItem $driverDir | ForEach-Object { Write-Info "$($_.Name)  ($($_.Length) bytes)" }
+
+# Verify we got the expected driver -- check version and required files
+$extractedInf = Join-Path $driverDir "AppleWirelessMouse.inf"
+$extractedSys = Join-Path $driverDir "AppleWirelessMouse.sys"
+$extractedCat = Join-Path $driverDir "AppleWirelessMouse.cat"
+if (-not (Test-Path $extractedInf) -or -not (Test-Path $extractedSys) -or -not (Test-Path $extractedCat)) {
+    throw "Extraction incomplete -- missing INF, SYS, or CAT file."
+}
+$driverVer = (Get-Content $extractedInf | Select-String "DriverVer").ToString().Trim()
+Write-OK "Driver version: $driverVer"
+if ($driverVer -notmatch "6\.1\.") {
+    Write-Warn "Unexpected driver version (expected 6.1.x) -- proceed with caution."
+}
 
 # ---------------------------------------------------------------------------
 # Step 3b -- Patch INF to add USB-C Magic Mouse hardware IDs
