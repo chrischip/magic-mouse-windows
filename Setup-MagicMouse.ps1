@@ -70,6 +70,43 @@ New-Item -ItemType Directory -Force $driverDir | Out-Null
 Write-Host "Work directory: $workDir" -ForegroundColor DarkGray
 
 # ---------------------------------------------------------------------------
+# Step 0 -- Optional system restore point
+#           This script makes kernel-level changes (test signing, HVCI, cert
+#           trust, driver install). A restore point lets the user roll back
+#           everything in one click if something goes wrong.
+# ---------------------------------------------------------------------------
+Write-Step 0 "System Restore Point"
+Write-Host ""
+Write-Host "    This script makes low-level changes to your Windows kernel" -ForegroundColor Yellow
+Write-Host "    configuration. A restore point lets you undo them instantly" -ForegroundColor Yellow
+Write-Host "    via Settings > System > Recovery > Open System Restore." -ForegroundColor Yellow
+Write-Host ""
+$restoreAnswer = Read-Host "    Create a system restore point before continuing? [Y/n]"
+if ($restoreAnswer -notmatch '^[Nn]') {
+    try {
+        # Ensure System Protection is enabled on the system drive
+        Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction SilentlyContinue
+
+        $restoreDesc = "Before MagicMouse Driver Install $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+        Checkpoint-Computer -Description $restoreDesc -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
+        Write-OK "Restore point created: '$restoreDesc'"
+        Write-Info "To restore if needed: Settings > System > Recovery > Open System Restore"
+    } catch {
+        # Windows enforces a 24-hour cooldown between restore points by default.
+        # Treat this as a warning, not a fatal error.
+        Write-Warn "Could not create restore point: $($_.Exception.Message)"
+        Write-Warn "You can create one manually: Start > 'Create a restore point' > Create"
+        $continueAnyway = Read-Host "    Continue without a restore point? [y/N]"
+        if ($continueAnyway -notmatch '^[Yy]') {
+            Write-Host "Aborted. Create a restore point manually and re-run." -ForegroundColor Red
+            exit 0
+        }
+    }
+} else {
+    Write-Warn "Skipping restore point. Proceeding without a safety net."
+}
+
+# ---------------------------------------------------------------------------
 # Step 1 -- 7-Zip
 # ---------------------------------------------------------------------------
 Write-Step 1 "Checking for 7-Zip..."
